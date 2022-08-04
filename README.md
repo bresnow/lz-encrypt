@@ -2,7 +2,7 @@
 
 ## Example
 
-![Example](img/example.png)
+![Example](img/example1.png)
 
 ### Install
 
