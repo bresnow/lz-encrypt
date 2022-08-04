@@ -1,4 +1,4 @@
-let crypto = await import('crypto').then((WebCrypto) => {
+const crypto = await import('crypto').then((WebCrypto) => {
 	return WebCrypto.webcrypto;
 });
 import forge from 'node-forge';
@@ -9,10 +9,10 @@ const ec = EC.ec;
 export interface IPair {
 	(pwd: any, salt: string | any[]): Promise<ISEAPair>;
 }
-export default async function Pair(pwd: any, salt: string | any[]): ReturnType<IPair> {
+export default async function Pair(pwd?: any, salt?: string | any[]): ReturnType<IPair> {
 	// forge.options.usePureJavaScript = true
 	return new Promise((resolve, reject) => {
-		let ec_p256 = new ec('p256');
+		const ec_p256 = new ec('p256');
 
 		if (!pwd) pwd = forge.random.getBytesSync(32);
 
@@ -31,11 +31,11 @@ export default async function Pair(pwd: any, salt: string | any[]): ReturnType<I
 		privateKey_s = privateKey_s.digest().toHex();
 		privateKey_d = privateKey_d.digest().toHex();
 
-		let keyA_d = ec_p256.keyFromPrivate(privateKey_d, 'hex');
+		const keyA_d = ec_p256.keyFromPrivate(privateKey_d, 'hex');
 		let validation = keyA_d.validate();
 		if (validation.reason) return reject(validation.reason);
 
-		let keyA_s = ec_p256.keyFromPrivate(privateKey_s, 'hex');
+		const keyA_s = ec_p256.keyFromPrivate(privateKey_s, 'hex');
 		validation = keyA_s.validate();
 		if (validation.reason) return reject(validation.reason);
 
@@ -50,7 +50,7 @@ export default async function Pair(pwd: any, salt: string | any[]): ReturnType<I
 
 	function arrayBufToBase64UrlEncode(buf: Iterable<number>) {
 		let binary = '';
-		let bytes = new Uint8Array(buf);
+		const bytes = new Uint8Array(buf);
 		for (let i = 0; i < bytes.byteLength; i++) {
 			binary += String.fromCharCode(bytes[i]);
 		}
@@ -76,11 +76,11 @@ export default async function Pair(pwd: any, salt: string | any[]): ReturnType<I
 	}
 	//Hey dan whats this?
 	function b32(s: string) {
-		let alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+		const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
-		let parts: string[] = [];
+		const parts: string[] = [];
 		let quanta = Math.floor(s.length / 5);
-		let leftover = s.length % 5;
+		const leftover = s.length % 5;
 
 		if (leftover != 0) {
 			for (let i = 0; i < 5 - leftover; i++) {

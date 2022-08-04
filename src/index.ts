@@ -1,173 +1,154 @@
-import Gun, { GunMessagePut, IGunChain, IGunInstanceRoot, IGunUserInstance, ISEAPair } from 'gun';
-import os from 'os';
-import lz from './lz-encrypt.js';
-import 'gun/lib/path.js';
-import 'gun/lib/load.js';
-import 'gun/lib/open.js';
-import 'gun/lib/then.js';
+import { ISEAPair } from 'gun';
+import { lzObject } from 'lz-object';
 import lzString from 'lz-string';
-import Pair from './pair.js';
-export const getCID = async (vaultname: string, keypair: ISEAPair) =>
-	lzString.compressToEncodedURIComponent((await Gun.SEA.work(vaultname, keypair)) as string);
-const SEA = Gun.SEA;
+import { checkIfThis } from './check.js';
+import pair from './pair.js';
+import Gun from 'gun';
+/**
+ *
+ * LZ-Encrypt uses the sea algorith to encrypt/decrypt and compress/decompresswith lz-string.
+ * The methods only effect the object values as to easily traverse graph nodes
+ */
 
-declare module 'gun/types' {
-	interface IGunInstance<TNode> extends IGunUserInstance {
-		/**
-		 * Create a new vault context.
-		 *
-		 * Takes the lockername and generates the keys against machine info.
-		 * Should require sudo privilages to create a new vault.
-		 *
-		 */
-		vault(
-			vaultname: string,
-			keys: ISEAPair,
-			cb?: CallBack
-		): IGunUserInstance<any, any, any, IGunInstanceRoot<any, IGunInstance<any>>>;
-		/**
-		 * Get a locker instance for a node in the chain.
-		 *
-		 * @param {string}
-		 */
-		locker(nodepath: string | string[]): {
-			value(cb: CallBack): Promise<void>;
-			put(data: any, cb?: CallBack): Promise<void>;
-		};
-		keys(secret?: string | string[], callback?: CallBack): Promise<ISEAPair>;
+interface CompressorToString {
+	(uncompressed: string): string;
+}
+interface CompressorToUintArray {
+	(uncompressed: string): Uint8Array;
+}
+interface DecompressorFromUintArray {
+	(compressed: Uint8Array): string | null;
+}
+interface DecompressorFromString {
+	(compressed: string): string | null;
+}
+export async function encrypt(
+	object: any,
+	encryptionkey: ISEAPair | { epriv: string },
+	compressionOptions?: Partial<{
+		compress: boolean;
+		encoding: 'utf16' | 'uint8array' | 'base64' | 'uri';
+	}>
+) {
+	const compressionType = compressionOptions?.encoding ?? 'utf16';
+	let compress: CompressorToString | CompressorToUintArray;
+	if (typeof object === 'string') {
+		const encrypted = await Gun.SEA.encrypt(object, encryptionkey);
+		switch (compressionType) {
+			case 'utf16':
+				compress = lzString.compressToUTF16;
+				break;
+			// case 'uint8array':
+			//   compress = lzString.compressToUint8Array
+			//   break
+			case 'base64':
+				compress = lzString.compressToBase64;
+				break;
+			case 'uri':
+				compress = lzString.compressToEncodedURIComponent;
+				break;
+			default:
+				new Error('Unknown compression type');
+				compress = lzString.compressToUTF16;
+				break;
+		}
+		const compressed = compress(encrypted);
+		return compressed;
 	}
-	interface IGunChain<TNode> extends IGunInstance {
-		scope(
-			what: string[],
-			callback: ScopeCb | undefined,
-			opts: {
-				verbose: boolean;
-				alias: string;
-			}
-		): Promise<void>;
-	}
-}
-export declare type ScopeCb = (
-	path?: string,
-	event?: 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir',
-	matches?: string[]
-) => void;
-export declare type CallBack = (...ack: any) => void;
-export declare type VaultOpts = {
-	keys: ISEAPair;
-	encoding?: 'utf16' | 'base64' | 'uint8array' | 'uri';
-};
 
-export async function SysUserPair(secret?: string[]) {
-	let { username, platform, arch } = getImmutableMachineInfo();
-	let salt = secret
-		? Object.values({ username, platform, arch }).concat(...secret)
-		: Object.values({ username, platform, arch });
-	let keys = await Pair({ username, platform, arch }, salt);
-	let workedImmutables = await Gun.SEA.work({ username, platform, arch }, keys, null, {
-		name: 'SHA-256',
-		salt
-	});
-	return { keys, username, serial: workedImmutables };
-}
-export function getImmutableMachineInfo() {
-	let username = os.userInfo().username,
-		// serial = sn.stdout.split(':')[1].trim(),
-		platform = os.platform(),
-		arch = os.arch();
-	return { username, platform, arch };
-}
+	let obj: Record<string, any> = {};
+	if (object && checkIfThis.isObject(object)) {
+		const entries = Object.entries(object);
+		for (let i = 0; i < entries.length; i += 1) {
+			const [objectKey, objectValue] = entries[i];
 
-Gun.chain.vault = function (vault, keys, cback) {
-	let _gun = this;
-	let gun = _gun.user();
-	gun = gun.auth(keys, (ack: any) => {
-		let err = (ack as any).err;
-		if (err) {
-			throw new Error(err);
-		}
-		let lock = gun.get(`chainlocker`);
-		lock.once(async function (data: { _: any }) {
-			let cID = await getCID(vault, keys);
-			if (!data) {
-				lock.put({ vault, vault_id: cID });
-			}
-			if (data) {
-				let obj: { vault: any; vault_id: string }, tmp: any;
-				tmp = data._;
-				delete data._;
-				obj = await lz.decrypt(data, keys);
-				if (obj.vault && obj.vault_id !== cID) {
-					//check POW hashes to make sure they match
-					throw new Error(`Err authenticating ${vault}`);
-				}
-				cback && cback({ _: tmp, chainlocker: obj, gun: ack });
-			}
-		});
-	});
-
-	_gun.locker = (nodepath: string | any[]) => {
-		let path: string | any[],
-			temp = gun as unknown as IGunChain<any>; // gets tricky with types but doable
-		if (typeof nodepath === 'string') {
-			path = nodepath.split('/' || '.');
-			if (1 === path.length) {
-				temp = temp.get(nodepath);
-			}
-			nodepath = path;
-		}
-		if (nodepath instanceof Array) {
-			if (nodepath.length > 1) {
-				var i = 0,
-					l = nodepath.length;
-				for (i; i < l; i++) {
-					temp = temp.get(nodepath[i]);
-				}
-			} else {
-				temp = temp.get(nodepath[0]);
-			}
-		}
-		let node = temp;
-		return {
-			async put(
-				data: string | Record<string, any> | undefined,
-				cb2: (arg0: GunMessagePut) => void
+			if (
+				(encryptionkey && checkIfThis.isString(objectValue)) ||
+				checkIfThis.isBoolean(objectValue) ||
+				checkIfThis.isNumber(objectValue)
 			) {
-				data = await lz.encrypt(data, keys);
-				node.put(data, (ack) => {
-					if (cb2) {
-						cb2(ack);
-					}
-				});
-			},
-			async value(cb: (arg0: { err: string }) => void | PromiseLike<void>) {
-				node.once(async (data) => {
-					let obj: any, tmp: any;
-					if (!data) {
-						return cb({ err: 'Record not found' });
-					} else {
-						tmp = data._;
-						delete data._;
-						obj = await lz.decrypt(data, keys);
-						cb({ _: tmp, ...obj });
-					}
-				});
+				try {
+					const encrypted = await Gun.SEA.encrypt(objectValue, encryptionkey);
+					Object.assign(obj, { [objectKey]: encrypted });
+				} catch (error) {
+					throw new Error(error as string);
+				}
 			}
-		};
-	};
-
-	return gun; //return gun user instance
-};
-
-Gun.chain.keys = async function (secret, callback) {
-	// can add secret string, username and password, or an array of secret strings\
-	let keypair: ISEAPair | PromiseLike<ISEAPair>;
-	if (secret) {
-		let sys = await SysUserPair(typeof secret === 'string' ? [secret] : [...secret]);
-		keypair = sys.keys;
-	} else {
-		keypair = (await SysUserPair()).keys;
+			if (encryptionkey && checkIfThis.isObject(objectValue)) {
+				await encrypt(objectValue, encryptionkey);
+			}
+		}
+		// console.log(JSON.stringify(lzObject.compress(obj, { output: 'uint8array'}), null, 2))
+		obj = lzObject.compress(obj, { output: compressionOptions?.encoding ?? 'utf16' });
+		return obj;
 	}
-	callback && callback(keypair);
-	return keypair;
-};
+}
+export async function decrypt(
+	object: any,
+	encryptionkey: ISEAPair | { epriv: string },
+	compressionOptions?: Partial<{
+		compress: boolean;
+		encoding: 'utf16' | 'uint8array' | 'base64' | 'uri';
+	}>
+) {
+	if (!object) {
+		new Error('cannot decrypt and decompress object as it is undefined');
+		// throw new Error('cannot decrypt and decompress object as it is undefined');
+	}
+
+	const decompressionType = compressionOptions?.encoding ?? 'utf16';
+	if (typeof object === 'string') {
+		let decomp: string | null;
+		let decrypted: any;
+		switch (decompressionType) {
+			case 'utf16':
+				decomp = lzString.decompressFromUTF16(object);
+				decrypted = decomp && Gun.SEA.decrypt(decomp, encryptionkey);
+				break;
+			// case 'uint8array':
+			//   decomp = lzString.decompressFromUint8Array(object)  as any as string
+			//   decrypted = decomp && Gun.SEA.decrypt(decomp, encryptionkey)
+			case 'base64':
+				decomp = lzString.decompressFromBase64(object);
+				decrypted = decomp && Gun.SEA.decrypt(decomp, encryptionkey);
+				break;
+			case 'uri':
+				decomp = lzString.decompressFromEncodedURIComponent(object);
+				decrypted = decomp && Gun.SEA.decrypt(decomp, encryptionkey);
+				break;
+			default:
+				new Error('Unknown compression type');
+				decomp = lzString.decompressFromUTF16(object);
+				decrypted = decomp && Gun.SEA.decrypt(decomp, encryptionkey);
+				break;
+		}
+		return decrypted;
+	}
+	object = lzObject.decompress(object, { output: compressionOptions?.encoding ?? 'utf16' });
+	const obj: Record<string, any> = {};
+	if (checkIfThis.isObject(object)) {
+		const entries: [string, string | any][] = Object.entries(object);
+		for (let i = 0; i < entries.length; i += 1) {
+			const [objectKey, objectValue] = entries[i];
+
+			if (encryptionkey && checkIfThis.isString(objectValue)) {
+				const decrypted = await Gun.SEA.decrypt(objectValue, encryptionkey);
+				Object.assign(obj, { [objectKey]: decrypted });
+			}
+			if (encryptionkey && checkIfThis.isObject(objectValue)) {
+				await decrypt(objectValue, encryptionkey);
+			}
+		}
+	}
+	return obj;
+}
+
+export { pair };
+// const test = { test: 'njsanj1', test1: 'ajbsdkjasbda2', test11: 'dkjasbdksj3', test111: 'sadahsbdkshda', testyyyy: 'TESTERRRRR' },
+//   enc = { epriv: 'khjksbkdjbsajkbdljkasblfsbdajkfbsdkjfbasdklfbasljdbfskdjb' }
+// console.info(`encrypting test object`)
+// let encrypted = await encrypt(test, enc)
+// info(JSON.stringify(encrypted, null, 2))
+// console.info(`decrypting test object`)
+// let decrypted = await decrypt(encrypted, enc)
+// info(JSON.stringify(decrypted, null, 2))

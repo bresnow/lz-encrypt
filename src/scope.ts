@@ -1,9 +1,31 @@
-import Gun from 'gun';
+import Gun, { IGunInstance, IGunInstanceRoot, IGunUserInstance, ISEAPair } from 'gun';
 import 'gun/lib/path.js';
 import chokidar from 'chokidar';
 import { glob, chalk } from 'zx';
-import { read, exists } from './file-utils';
+import { read, exists } from './utils';
 import os from 'os';
+declare module 'gun/types' {
+	interface IGunChain<TNode> extends IGunInstance {
+		scope(
+			what: string[],
+			callback: ScopeCb | undefined,
+			opts: {
+				verbose: boolean;
+				alias: string;
+			}
+		): Promise<void>;
+	}
+}
+export declare type ScopeCb = (
+	path?: string,
+	event?: 'add' | 'addDir' | 'change' | 'unlink' | 'unlinkDir',
+	matches?: string[]
+) => void;
+export declare type CallBack = (...ack: any) => void;
+export declare type VaultOpts = {
+	keys: ISEAPair;
+	encoding?: 'utf16' | 'base64' | 'uint8array' | 'uri';
+};
 
 /**
  * Scope watches the files in a directory and stores them in rad. No separate .ignore files as it uses the .gitignore file already in your current directory.
@@ -13,18 +35,18 @@ import os from 'os';
  * TODO: Broadcast files via relay server
  * TODO: ChainLocker
  */
-let { username } = os.userInfo();
+const { username } = os.userInfo();
 Gun.chain.scope = async function (what, callback, { verbose, alias }) {
-	let _gun = this;
+	const _gun = this;
 	verbose = verbose ?? true;
 	alias = alias ?? username;
-	let matches = await glob(what, { gitignore: true });
+	const matches = await glob(what, { gitignore: true });
 
 	try {
-		let scope = chokidar.watch(matches, { persistent: true });
+		const scope = chokidar.watch(matches, { persistent: true });
 		const log = console.log;
 		scope.on('all', (event, path) => {
-			let fileOpts = { path, matches, event };
+			const fileOpts = { path, matches, event };
 			if (callback) {
 				callback(path, event, matches);
 				if (verbose) {
@@ -38,8 +60,8 @@ Gun.chain.scope = async function (what, callback, { verbose, alias }) {
 					verbose && log(chalk.red(`File ${path} does not exist`));
 					return;
 				}
-				let nodepath = path.includes('/') ? path.split('/').map((x) => x.trim()) : [path];
-				let name = nodepath.length > 1 ? nodepath.at(nodepath.length - 1) : nodepath[0];
+				const nodepath = path.includes('/') ? path.split('/').map((x) => x.trim()) : [path];
+				const name = nodepath.length > 1 ? nodepath.at(nodepath.length - 1) : nodepath[0];
 				nodepath.pop() && nodepath.pop();
 				if (nodepath && name) {
 					_gun
@@ -57,8 +79,8 @@ Gun.chain.scope = async function (what, callback, { verbose, alias }) {
 					verbose && log(chalk.red(`File ${path} does not exist`));
 					return;
 				}
-				let nodepath = path.includes('/') ? path.split('/').map((x) => x.trim()) : [path.trim()];
-				let name = nodepath.length > 1 ? nodepath.at(nodepath.length - 1) : nodepath[0];
+				const nodepath = path.includes('/') ? path.split('/').map((x) => x.trim()) : [path.trim()];
+				const name = nodepath.length > 1 ? nodepath.at(nodepath.length - 1) : nodepath[0];
 				nodepath.pop() && nodepath.pop();
 				if (nodepath && name) {
 					_gun
@@ -83,8 +105,8 @@ Gun.chain.scope = async function (what, callback, { verbose, alias }) {
 					verbose && log(chalk.red(`File ${path} does not exist`));
 					return;
 				}
-				let nodepath = path.includes('/') ? path.split('/').map((x) => x.trim()) : [path];
-				let name = nodepath.length > 1 ? nodepath.at(nodepath.length - 1) : nodepath[0];
+				const nodepath = path.includes('/') ? path.split('/').map((x) => x.trim()) : [path];
+				const name = nodepath.length > 1 ? nodepath.at(nodepath.length - 1) : nodepath[0];
 				nodepath.pop() && nodepath.pop();
 				if (nodepath && name) {
 					_gun

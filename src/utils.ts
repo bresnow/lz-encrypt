@@ -38,7 +38,7 @@ read.sync = function (...args: any) {
 };
 
 export async function mkdir(...path: string[]) {
-	let input = interpretPath(...path);
+	const input = interpretPath(...path);
 	return fs.mkdir(input);
 }
 export async function write(path: any, content: any) {
@@ -65,5 +65,5 @@ export function glob(args: string[]) {
 	const input = args.map((path) => interpretPath(path));
 	return fg(input, { cwd: interpretPath() });
 }
-
-export { cd, fs, fg };
+let log = console.log.bind(console);
+export { cd, fs, fg, log };
